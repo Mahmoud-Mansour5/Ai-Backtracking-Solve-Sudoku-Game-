@@ -3,9 +3,8 @@ from tkinter import messagebox
 import random
 import time
 
-
 class Sudoku:
-    def _init_(self, master):
+    def __init__(self, master):
         self.master = master
         master.title("Sudoku")
 
@@ -175,21 +174,18 @@ class Sudoku:
         row = widget.grid_info()['row']
         col = widget.grid_info()['column']
 
-        # Check for duplicates in row
-        for j in range(9):
-            if j != col and self.entries[row][j].get() == value:
-                messagebox.showwarning("Duplicate Entry", "This number already exists in the row.")
-                widget.delete(0, END)
-                self.stop_timer()  # Stop timer when alert comes up
-                return
+        # Update the grid with the new value
+        self.grid[row][col] = int(value)
 
-        # Check for duplicates in column
-        for i in range(9):
-            if i != row and self.entries[i][col].get() == value:
-                messagebox.showwarning("Duplicate Entry", "This number already exists in the column.")
-                widget.delete(0, END)
-                self.stop_timer()  # Stop timer when alert comes up
-                return
+        # Check for duplicates in row, column, and 3x3 subgrid
+        if not self.is_valid_move(row, col, int(value)):
+            messagebox.showwarning("Invalid Entry", "This number violates Sudoku constraints.")
+            widget.delete(0, END)
+            self.grid[row][col] = 0  # Reset the grid value
+
+        # Apply arc consistency
+        if not self.apply_arc_consistency():
+            messagebox.showwarning("Invalid Puzzle", "The puzzle is invalid or unsolvable.")
 
     def generate_puzzle(self):
         """Generate a new Sudoku puzzle."""
@@ -336,6 +332,92 @@ class Sudoku:
         self.timer_running = False
         self.timer_label.config(text="Time: 0:00")
 
+    def apply_arc_consistency(self):
+        """Apply arc consistency to the Sudoku grid."""
+        arcs = self.initialize_arcs()
+        domains = self.initialize_domains()
+        while arcs:
+            (Xi, Xj) = arcs.pop(0)
+            if self.revise(domains, Xi, Xj):
+                if not domains[Xi]:
+                    return False
+                for Xk in self.get_related_cells(Xi):
+                    if Xk != Xj:
+                        arcs.append((Xk, Xi))
+        self.update_grid_with_domains(domains)
+        return True
+
+    def initialize_arcs(self):
+        """Initialize arcs for the Sudoku grid."""
+        arcs = []
+        for i in range(9):
+            for j in range(9):
+                for k in range(9):
+                    if j != k:
+                        arcs.append(((i, j), (i, k)))
+                    if i != k:
+                        arcs.append(((i, j), (k, j)))
+                start_row, start_col = 3 * (i // 3), 3 * (j // 3)
+                for x in range(start_row, start_row + 3):
+                    for y in range(start_col, start_col + 3):
+                        if (x, y) != (i, j):
+                            arcs.append(((i, j), (x, y)))
+        return arcs
+
+    def initialize_domains(self):
+        """Initialize domains for each cell in the Sudoku grid."""
+        domains = {}
+        for i in range(9):
+            for j in range(9):
+                if self.grid[i][j] == 0:
+                    domains[(i, j)] = set(range(1, 10))
+                else:
+                    domains[(i, j)] = {self.grid[i][j]}
+        for i in range(9):
+            for j in range(9):
+                if self.grid[i][j] != 0:
+                    for k in range(9):
+                        if j != k:
+                            domains[(i, k)].discard(self.grid[i][j])
+                        if i != k:
+                            domains[(k, j)].discard(self.grid[i][j])
+                    start_row, start_col = 3 * (i // 3), 3 * (j // 3)
+                    for x in range(start_row, start_row + 3):
+                        for y in range(start_col, start_col + 3):
+                            if (x, y) != (i, j):
+                                domains[(x, y)].discard(self.grid[i][j])
+        return domains
+
+    def revise(self, domains, Xi, Xj):
+        """Revise the domain of Xi based on the domain of Xj."""
+        revised = False
+        for x in set(domains[Xi]):
+            if not any(y != x for y in domains[Xj]):
+                domains[Xi].remove(x)
+                revised = True
+        return revised
+
+    def get_related_cells(self, cell):
+        """Get cells related to a given cell (row, column, and 3x3 subgrid)."""
+        i, j = cell
+        related = []
+        for k in range(9):
+            if k != j:
+                related.append((i, k))
+            if k != i:
+                related.append((k, j))
+        start_row, start_col = 3 * (i // 3), 3 * (j // 3)
+        for x in range(start_row, start_row + 3):
+            for y in range(start_col, start_col + 3):
+                if (x, y) != (i, j):
+                    related.append((x, y))
+        return related
+
+    def update_grid_with_domains(self, domains):
+        """Update the Sudoku grid based on the reduced domains."""
+        for (i, j), domain in domains.items():
+            if len(domain) == 1:
+                self.grid[i][j] = domain.pop()
 
 if __name__ == "__main__":
     root = Tk()
